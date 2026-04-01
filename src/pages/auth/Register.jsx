@@ -3,6 +3,7 @@ import { motion } from 'framer-motion'
 import { ArrowRight, Check, Mail, User } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AuthLayout, AuthCard, InputField, PasswordInput, GradientButton, FormError, TrustSignals } from '@/components/auth'
+import { registerUser } from '@/services/auth'
 
 const MotionDiv = motion.div
 
@@ -46,6 +47,7 @@ export default function Register() {
   const [touched, setTouched] = useState({})
   const [submitted, setSubmitted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const errors = useMemo(() => getErrors(form), [form])
   const isValid = Object.keys(errors).length === 0
@@ -54,20 +56,31 @@ export default function Register() {
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }))
+    setSubmitError('')
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
     setSubmitted(true)
+    setSubmitError('')
 
     if (!isValid) {
       return
     }
 
     setIsSubmitting(true)
-    window.setTimeout(() => {
+    try {
+      await registerUser({
+        fullName: form.fullName.trim(),
+        email: form.email.trim(),
+        password: form.password,
+      })
       navigate('/auth/login')
-    }, 650)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to create account right now.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -167,6 +180,8 @@ export default function Register() {
                 <ArrowRight className="h-4 w-4" />
               </span>
             </GradientButton>
+
+            <FormError message={submitError} />
           </form>
 
           <TrustSignals />
