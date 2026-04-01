@@ -6,7 +6,7 @@ import PriorityTradesPanel from '@/components/dashboard/priority-trades-panel'
 import AnimatedPage from '@/components/animated-page'
 import PageHeader from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
-import { trades } from '@/data/mock'
+import { useTradesData } from '@/hooks/use-trades-data'
 
 const stats = [
   {
@@ -69,6 +69,7 @@ const recentActivity = [
 ]
 
 export default function DashboardPage() {
+  const { trades } = useTradesData()
   const priorityTrades = trades.filter((trade) => trade.status === 'HOLD' || trade.status === 'SHIPPED').slice(0, 4)
 
   return (

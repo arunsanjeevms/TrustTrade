@@ -10,7 +10,7 @@ import PageHeader from '@/components/shared/page-header'
 import StatusBadge from '@/components/shared/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { tradeRoomMessages } from '@/data/mock'
+import { useTradesData } from '@/hooks/use-trades-data'
 
 const MotionDiv = motion.div
 
@@ -38,19 +38,22 @@ function nowTime() {
 }
 
 export default function TradeRoomPage() {
+  const { tradeRoomMessages } = useTradesData()
   const [role, setRole] = useState('seller')
   const [currentStatus, setCurrentStatus] = useState('HOLD')
   const [disputeOpen, setDisputeOpen] = useState(false)
   const [roomClosed, setRoomClosed] = useState(false)
-  const [messages, setMessages] = useState(
-    tradeRoomMessages.map((message) => ({
+  const [localMessages, setLocalMessages] = useState([])
+  const [uploadedFiles, setUploadedFiles] = useState([])
+  const messages = [
+    ...tradeRoomMessages.map((message) => ({
       id: message.id,
       sender: message.sender,
       body: message.body,
       time: message.time,
     })),
-  )
-  const [uploadedFiles, setUploadedFiles] = useState([])
+    ...localMessages,
+  ]
 
   const statusText = roomClosed
     ? 'Room is closed. No further state transitions are available.'
@@ -59,7 +62,7 @@ export default function TradeRoomPage() {
       : statusDescription[currentStatus]
 
   const appendMessage = (sender, body) => {
-    setMessages((current) => [
+    setLocalMessages((current) => [
       ...current,
       {
         id: `msg-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
