@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from 'react'
+﻿import { Fragment, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { Ban, ChevronDown, ChevronRight, Download, Search, SlidersHorizontal } from 'lucide-react'
 import AnimatedPage from '@/components/animated-page'
@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { trades } from '@/data/mock'
+import { useTradesData } from '@/hooks/use-trades-data'
 
 const filters = ['ALL', 'HOLD', 'SHIPPED', 'DELIVERED', 'CANCELLED']
 const MotionDiv = motion.div
@@ -51,7 +51,9 @@ const nowTimestamp = () => {
 const csvEscape = (value) => `"${String(value).replaceAll('"', '""')}"`
 
 export default function MyTradesPage() {
-  const [tableTrades, setTableTrades] = useState(trades)
+  const { trades: dataTrades } = useTradesData()
+  const [tableTrades, setTableTrades] = useState([])
+  const [hasLocalMutations, setHasLocalMutations] = useState(false)
   const [activeFilter, setActiveFilter] = useState('ALL')
   const [query, setQuery] = useState('')
   const [sortBy, setSortBy] = useState('date')
@@ -59,8 +61,10 @@ export default function MyTradesPage() {
   const [expandedTradeId, setExpandedTradeId] = useState(null)
   const [selectedTradeIds, setSelectedTradeIds] = useState([])
 
+  const sourceTrades = hasLocalMutations ? tableTrades : dataTrades
+
   const filteredTrades = useMemo(() => {
-    const base = tableTrades.filter((trade) => {
+    const base = sourceTrades.filter((trade) => {
       const matchesFilter = activeFilter === 'ALL' || trade.status === activeFilter
       const matchesQuery =
         !query ||
@@ -79,7 +83,7 @@ export default function MyTradesPage() {
       const dateDiff = normalizeDate(a.updatedAt) - normalizeDate(b.updatedAt)
       return sortDirection === 'asc' ? dateDiff : -dateDiff
     })
-  }, [tableTrades, activeFilter, query, sortBy, sortDirection])
+  }, [sourceTrades, activeFilter, query, sortBy, sortDirection])
 
   const visibleTradeIds = filteredTrades.map((trade) => trade.id)
   const allVisibleSelected =
@@ -123,8 +127,9 @@ export default function MyTradesPage() {
       return
     }
 
+    setHasLocalMutations(true)
     setTableTrades((current) =>
-      current.map((trade) =>
+      (current.length ? current : dataTrades).map((trade) =>
         selectedTradeIds.includes(trade.id)
           ? {
               ...trade,
@@ -140,7 +145,7 @@ export default function MyTradesPage() {
 
   const onExport = () => {
     const rows = selectedTradeIds.length
-      ? tableTrades.filter((trade) => selectedTradeIds.includes(trade.id))
+      ? sourceTrades.filter((trade) => selectedTradeIds.includes(trade.id))
       : filteredTrades
 
     if (!rows.length) {
@@ -338,3 +343,5 @@ export default function MyTradesPage() {
     </AnimatedPage>
   )
 }
+
+

@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, Mail, Sparkles } from 'lucide-react'
 import { Link, useNavigate } from 'react-router-dom'
-import { AuthLayout, AuthCard, InputField, PasswordInput, GradientButton, TrustSignals } from '@/components/auth'
+import { AuthLayout, AuthCard, InputField, PasswordInput, GradientButton, FormError, TrustSignals } from '@/components/auth'
+import { loginUser } from '@/services/auth'
 
 const MotionDiv = motion.div
 
@@ -28,6 +29,7 @@ export default function Login() {
   const [touched, setTouched] = useState({})
   const [submitted, setSubmitted] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState('')
 
   const errors = useMemo(() => getErrors(form), [form])
   const isValid = Object.keys(errors).length === 0
@@ -36,20 +38,30 @@ export default function Login() {
 
   const updateField = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }))
+    setSubmitError('')
   }
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault()
     setSubmitted(true)
+    setSubmitError('')
 
     if (!isValid) {
       return
     }
 
     setIsSubmitting(true)
-    window.setTimeout(() => {
+    try {
+      await loginUser({
+        email: form.email.trim(),
+        password: form.password,
+      })
       navigate('/')
-    }, 600)
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to sign in right now.')
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   return (
@@ -110,6 +122,8 @@ export default function Login() {
                 <ArrowRight className="h-4 w-4" />
               </span>
             </GradientButton>
+
+            <FormError message={submitError} />
           </form>
 
           <div className="mt-4">
