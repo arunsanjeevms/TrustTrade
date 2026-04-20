@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, CircleCheck, ClipboardPaste, QrCode, UserRoundPlus } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, useLocation } from 'react-router-dom'
 import AnimatedPage from '@/components/animated-page'
 import JoinGuidance from '@/components/join-trade/join-guidance'
 import RecentJoinHistory from '@/components/join-trade/recent-join-history'
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { extractUserIdFromInvite } from '@/lib/qr'
 
 const MotionDiv = motion.div
 
@@ -19,31 +20,8 @@ const initialHistory = [
   { id: 'jh-3', userId: 'u_camvera', status: 'accepted', time: 'Yesterday, 19:11' },
 ]
 
-function extractUserIdFromInvite(text) {
-  const raw = text.trim()
-  if (!raw) {
-    return ''
-  }
-
-  if (/^u_[a-z0-9_-]{3,}$/i.test(raw)) {
-    return raw
-  }
-
-  try {
-    const url = new URL(raw)
-    const candidate =
-      url.searchParams.get('user') ||
-      url.searchParams.get('uid') ||
-      url.searchParams.get('id') ||
-      url.pathname.split('/').filter(Boolean).find((segment) => /^u_[a-z0-9_-]{3,}$/i.test(segment))
-
-    return candidate || ''
-  } catch {
-    return ''
-  }
-}
-
 export default function JoinTradePage() {
+  const location = useLocation()
   const [userId, setUserId] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [touched, setTouched] = useState(false)
@@ -51,6 +29,31 @@ export default function JoinTradePage() {
   const [joinHistory, setJoinHistory] = useState(initialHistory)
 
   const hasError = touched && userId.trim().length < 4
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    const inviteValue =
+      params.get('invite') ||
+      params.get('user') ||
+      params.get('uid') ||
+      params.get('id') ||
+      ''
+
+    if (!inviteValue) {
+      return
+    }
+
+    const extracted = extractUserIdFromInvite(inviteValue)
+    if (!extracted) {
+      setPasteError('Scanned QR did not contain a valid User ID.')
+      return
+    }
+
+    setUserId(extracted)
+    setTouched(true)
+    setSubmitted(false)
+    setPasteError('')
+  }, [location.search])
 
   const onPasteInvite = async () => {
     setPasteError('')

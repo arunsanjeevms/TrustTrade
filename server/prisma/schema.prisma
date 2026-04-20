@@ -1,0 +1,474 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  MODERATOR
+  ADMIN
+}
+
+enum TradeStatus {
+  PENDING_JOIN
+  HOLD
+  SHIPPED
+  DELIVERED
+  COMPLETED
+  CANCELLED
+  DISPUTED
+}
+
+enum EscrowStatus {
+  PENDING
+  LOCKED
+  RELEASED
+  REFUNDED
+  CANCELLED
+}
+
+enum ParticipantRole {
+  BUYER
+  SELLER
+}
+
+enum ParticipantStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  LEFT
+}
+
+enum MilestoneStatus {
+  PENDING
+  IN_REVIEW
+  APPROVED
+  REJECTED
+}
+
+enum TradeActivityType {
+  MESSAGE
+  STATUS_CHANGE
+  FILE_UPLOAD
+  ESCROW_UPDATE
+  DISPUTE_OPENED
+  DISPUTE_RESOLVED
+  SYSTEM
+}
+
+enum EscrowAction {
+  LOCK_FUNDS
+  RELEASE_FUNDS
+  REFUND_FUNDS
+  PARTIAL_RELEASE
+  FEE
+}
+
+enum EscrowTxStatus {
+  INITIATED
+  CONFIRMED
+  FAILED
+  REVERSED
+}
+
+enum WalletTxType {
+  DEPOSIT
+  HOLD
+  RELEASE
+  REFUND
+  FEE
+  ADJUSTMENT
+}
+
+enum WalletTxDirection {
+  CREDIT
+  DEBIT
+}
+
+enum WalletTxStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REVERSED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_REFUND
+  RESOLVED_RELEASE
+  RESOLVED_PARTIAL
+  REJECTED
+  CLOSED
+}
+
+enum EvidenceType {
+  IMAGE
+  PDF
+  VIDEO
+  CHAT_EXPORT
+  OTHER
+}
+
+enum NotificationType {
+  SYSTEM
+  TRADE
+  DISPUTE
+  ESCROW
+  SECURITY
+}
+
+enum ReputationEventType {
+  TRADE_COMPLETED
+  DISPUTE_WON
+  DISPUTE_LOST
+  LATE_SHIPMENT
+  VERIFIED_PROFILE
+  MODERATOR_ACTION
+}
+
+enum AIModelType {
+  FRAUD_RISK
+  DISPUTE_SUMMARY
+  TRADE_ASSIST
+}
+
+enum BlockchainNetwork {
+  ETHEREUM
+  POLYGON
+  BASE
+  BNB_CHAIN
+  SOLANA
+}
+
+model User {
+  id               String   @id @default(cuid())
+  email            String   @unique
+  passwordHash     String
+  fullName         String
+  avatarUrl        String?
+  role             UserRole @default(USER)
+  isEmailVerified  Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  wallet               Wallet?
+  tradesCreated        Trade[]            @relation("TradeCreator")
+  tradeParticipants    TradeParticipant[]
+  tradeActivities      TradeActivity[]    @relation("ActivityActor")
+  tradeFiles           TradeFile[]        @relation("FileUploader")
+  disputesOpened       DisputeCase[]      @relation("DisputeOpenedBy")
+  disputesResolved     DisputeCase[]      @relation("DisputeResolvedBy")
+  disputeNotes         DisputeNote[]      @relation("DisputeNoteAuthor")
+  disputeEvidence      DisputeEvidence[]  @relation("EvidenceUploader")
+  notifications        Notification[]
+  reputationEvents     ReputationEvent[]
+  aiScores             AIScore[]
+}
+
+model Wallet {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  currency     String   @default("USD")
+  balance      Decimal  @default(0) @db.Decimal(18, 2)
+  locked       Decimal  @default(0) @db.Decimal(18, 2)
+  released     Decimal  @default(0) @db.Decimal(18, 2)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user          User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions  WalletTransaction[]
+}
+
+model WalletTransaction {
+  id           String            @id @default(cuid())
+  walletId     String
+  tradeId      String?
+  type         WalletTxType
+  direction    WalletTxDirection
+  status       WalletTxStatus    @default(PENDING)
+  amount       Decimal           @db.Decimal(18, 2)
+  currency     String            @default("USD")
+  reference    String?
+  metadata     Json?
+  createdAt    DateTime          @default(now())
+
+  wallet       Wallet            @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  trade        Trade?            @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+
+  @@index([walletId, createdAt])
+  @@index([tradeId])
+}
+
+model Trade {
+  id                     String          @id @default(cuid())
+  publicId               String          @unique
+  createdById            String
+  title                  String
+  description            String
+  amount                 Decimal         @db.Decimal(18, 2)
+  currency               String          @default("USD")
+  shippingMethod         String
+  status                 TradeStatus     @default(PENDING_JOIN)
+  escrowStatus           EscrowStatus    @default(PENDING)
+  roomClosed             Boolean         @default(false)
+  expectedShipBy         DateTime?
+  expectedDeliveryBy     DateTime?
+  riskScore              Decimal?        @db.Decimal(5, 4)
+  chainNetwork           BlockchainNetwork?
+  escrowContractAddress  String?
+  escrowTxHash           String?
+  metadata               Json?
+  createdAt              DateTime        @default(now())
+  updatedAt              DateTime        @updatedAt
+
+  createdBy           User               @relation("TradeCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  participants        TradeParticipant[]
+  milestones          TradeMilestone[]
+  activities          TradeActivity[]
+  files               TradeFile[]
+  escrowTransactions  EscrowTransaction[]
+  disputes            DisputeCase[]
+  notifications       Notification[]
+  reputationEvents    ReputationEvent[]
+  aiScores            AIScore[]
+  walletTransactions  WalletTransaction[]
+
+  @@index([createdById, createdAt])
+  @@index([status, updatedAt])
+}
+
+model TradeParticipant {
+  id         String             @id @default(cuid())
+  tradeId    String
+  userId     String
+  role       ParticipantRole
+  status     ParticipantStatus  @default(PENDING)
+  joinedAt   DateTime?
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
+
+  trade      Trade              @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, userId])
+  @@index([userId, status])
+  @@index([tradeId, role])
+}
+
+model TradeMilestone {
+  id           String           @id @default(cuid())
+  tradeId      String
+  title        String
+  description  String?
+  position     Int
+  amount       Decimal?         @db.Decimal(18, 2)
+  status       MilestoneStatus  @default(PENDING)
+  dueAt        DateTime?
+  completedAt  DateTime?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  trade        Trade            @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@unique([tradeId, position])
+  @@index([tradeId, status])
+}
+
+model TradeActivity {
+  id         String             @id @default(cuid())
+  tradeId    String
+  actorId    String?
+  type       TradeActivityType
+  message    String
+  payload    Json?
+  createdAt  DateTime           @default(now())
+
+  trade      Trade              @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  actor      User?              @relation("ActivityActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([tradeId, createdAt])
+  @@index([actorId])
+}
+
+model TradeFile {
+  id              String            @id @default(cuid())
+  tradeId         String
+  uploadedById    String
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  storageKey      String            @unique
+  checksumSha256  String
+  onChainHash     String?
+  onChainTxHash   String?
+  createdAt       DateTime          @default(now())
+
+  trade           Trade             @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  uploadedBy      User              @relation("FileUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+  disputeEvidence DisputeEvidence[]
+
+  @@index([tradeId, createdAt])
+  @@index([uploadedById])
+}
+
+model EscrowTransaction {
+  id                 String           @id @default(cuid())
+  tradeId            String
+  action             EscrowAction
+  status             EscrowTxStatus   @default(INITIATED)
+  amount             Decimal          @db.Decimal(18, 2)
+  currency           String           @default("USD")
+  chainNetwork       BlockchainNetwork?
+  chainTxHash        String?
+  providerReference  String?
+  metadata           Json?
+  createdAt          DateTime         @default(now())
+  confirmedAt        DateTime?
+
+  trade              Trade            @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+
+  @@index([tradeId, createdAt])
+  @@index([chainTxHash])
+}
+
+model DisputeCase {
+  id                 String          @id @default(cuid())
+  tradeId            String
+  openedById         String
+  resolvedById       String?
+  status             DisputeStatus   @default(OPEN)
+  reason             String
+  resolutionSummary  String?
+  resolutionAmount   Decimal?        @db.Decimal(18, 2)
+  resolvedAt         DateTime?
+  createdAt          DateTime        @default(now())
+  updatedAt          DateTime        @updatedAt
+
+  trade              Trade           @relation(fields: [tradeId], references: [id], onDelete: Cascade)
+  openedBy           User            @relation("DisputeOpenedBy", fields: [openedById], references: [id], onDelete: Restrict)
+  resolvedBy         User?           @relation("DisputeResolvedBy", fields: [resolvedById], references: [id], onDelete: SetNull)
+  evidence           DisputeEvidence[]
+  notes              DisputeNote[]
+  summaries          AISummary[]
+  notifications      Notification[]
+  aiScores           AIScore[]
+
+  @@index([tradeId, status])
+  @@index([openedById, createdAt])
+}
+
+model DisputeEvidence {
+  id              String        @id @default(cuid())
+  disputeId       String
+  tradeFileId     String?
+  uploadedById    String
+  evidenceType    EvidenceType
+  description     String?
+  storageKey      String?
+  checksumSha256  String?
+  onChainHash     String?
+  onChainTxHash   String?
+  createdAt       DateTime      @default(now())
+
+  dispute         DisputeCase   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  tradeFile       TradeFile?    @relation(fields: [tradeFileId], references: [id], onDelete: SetNull)
+  uploadedBy      User          @relation("EvidenceUploader", fields: [uploadedById], references: [id], onDelete: Restrict)
+
+  @@index([disputeId, createdAt])
+  @@index([uploadedById])
+}
+
+model DisputeNote {
+  id          String      @id @default(cuid())
+  disputeId   String
+  authorId    String
+  note        String
+  isInternal  Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+
+  dispute     DisputeCase @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  author      User        @relation("DisputeNoteAuthor", fields: [authorId], references: [id], onDelete: Restrict)
+
+  @@index([disputeId, createdAt])
+  @@index([authorId])
+}
+
+model AISummary {
+  id                  String      @id @default(cuid())
+  disputeId           String
+  modelName           String
+  summary             String
+  keyPoints           Json?
+  recommendedOutcome  String?
+  confidence          Decimal?    @db.Decimal(5, 4)
+  createdAt           DateTime    @default(now())
+
+  dispute             DisputeCase @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+
+  @@index([disputeId, createdAt])
+}
+
+model Notification {
+  id         String           @id @default(cuid())
+  userId     String
+  tradeId    String?
+  disputeId  String?
+  type       NotificationType
+  title      String
+  body       String
+  data       Json?
+  readAt     DateTime?
+  createdAt  DateTime         @default(now())
+
+  user       User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trade      Trade?           @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  dispute    DisputeCase?     @relation(fields: [disputeId], references: [id], onDelete: SetNull)
+
+  @@index([userId, readAt, createdAt])
+  @@index([tradeId])
+  @@index([disputeId])
+}
+
+model ReputationEvent {
+  id          String               @id @default(cuid())
+  userId      String
+  tradeId     String?
+  type        ReputationEventType
+  scoreDelta  Int
+  reason      String
+  metadata    Json?
+  createdAt   DateTime             @default(now())
+
+  user        User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trade       Trade?               @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([tradeId])
+}
+
+model AIScore {
+  id         String       @id @default(cuid())
+  model      AIModelType
+  userId     String?
+  tradeId    String?
+  disputeId  String?
+  score      Decimal      @db.Decimal(5, 4)
+  level      String
+  summary    String?
+  signals    Json?
+  createdAt  DateTime     @default(now())
+
+  user       User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  trade      Trade?       @relation(fields: [tradeId], references: [id], onDelete: SetNull)
+  dispute    DisputeCase? @relation(fields: [disputeId], references: [id], onDelete: SetNull)
+
+  @@index([model, createdAt])
+  @@index([userId])
+  @@index([tradeId])
+  @@index([disputeId])
+}

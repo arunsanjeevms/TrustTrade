@@ -1,16 +1,75 @@
-# React + Vite
+# TrustTrade
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+TrustTrade is an escrow-focused trade platform with a React frontend and a Node.js + PostgreSQL backend.
 
-Currently, two official plugins are available:
+## Project Structure
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+- `src/` - Frontend (React + Vite)
+- `server/` - Backend API (Express + Prisma + PostgreSQL)
 
-## React Compiler
+## Prerequisites
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js 18+
+- PostgreSQL 15+
 
-## Expanding the ESLint configuration
+## Quick Start
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1. Install root dependencies
+	```bash
+	npm install
+	```
+2. Install backend dependencies
+	```bash
+	npm --prefix server install
+	```
+3. Create backend env file
+	```bash
+	cp server/.env.example server/.env
+	```
+	PowerShell alternative:
+	```powershell
+	Copy-Item server/.env.example server/.env
+	```
+4. Ensure PostgreSQL is running and create database `trusttrade`
+5. Push Prisma schema
+	```bash
+	npm --prefix server run db:push
+	```
+6. Seed demo data
+	```bash
+	npm --prefix server run seed
+	```
+
+## Development Commands
+
+- Frontend only:
+  ```bash
+  npm run dev:client
+  ```
+- Backend only:
+  ```bash
+  npm run dev:server
+  ```
+- Frontend + backend together:
+  ```bash
+  npm run dev:full
+  ```
+
+Frontend default URL: `http://localhost:5173`
+Backend default URL: `http://localhost:4000`
+
+## API
+
+API base path: `/api/v1`
+
+Main endpoints:
+
+- `POST /api/v1/auth/register`
+- `POST /api/v1/auth/login`
+- `GET /api/v1/users/me`
+- `GET /api/v1/dashboard/summary`
+- `GET /api/v1/trades`
+- `POST /api/v1/trades`
+- `GET /api/v1/wallet`
+- `POST /api/v1/disputes`
+- `GET /api/v1/notifications`
