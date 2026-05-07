@@ -1,12 +1,18 @@
 import { AlertTriangle, CircleCheckBig, PackageCheck, Truck, Wallet } from 'lucide-react'
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { cn } from '@/lib/utils'
 
-const roleOptions = ['seller', 'buyer', 'system']
-
 const actions = [
+  {
+    id: 'pay-escrow',
+    label: '💳 Pay Now',
+    icon: Wallet,
+    roles: ['buyer'],
+    isEnabled: ({ status, roomClosed, escrowStatus }) =>
+      !roomClosed && escrowStatus !== 'LOCKED' && escrowStatus !== 'RELEASED' && escrowStatus !== 'REFUNDED' && status !== 'COMPLETED' && status !== 'CANCELLED',
+    helper: 'Complete payment to lock funds in escrow. You will be redirected to the payment gateway.',
+  },
   {
     id: 'add-tracking',
     label: 'Add Tracking',
@@ -27,7 +33,7 @@ const actions = [
     id: 'release-escrow',
     label: 'Release Escrow',
     icon: Wallet,
-    roles: ['system'],
+    roles: ['system', 'seller'],
     isEnabled: ({ status, roomClosed, disputeOpen }) =>
       status === 'DELIVERED' && !roomClosed && !disputeOpen,
     helper: 'Escrow engine finalizes payout to seller.',
@@ -38,7 +44,7 @@ const actions = [
     icon: AlertTriangle,
     roles: ['seller', 'buyer'],
     isEnabled: ({ status, roomClosed, disputeOpen }) =>
-      !roomClosed && !disputeOpen && status !== 'COMPLETED',
+      !roomClosed && !disputeOpen && status !== 'COMPLETED' && status !== 'PENDING_JOIN',
     helper: 'Escalate issue and pause completion flow.',
     variant: 'destructive',
   },
@@ -47,44 +53,34 @@ const actions = [
     label: 'Close Room',
     icon: CircleCheckBig,
     roles: ['seller', 'buyer', 'system'],
-    isEnabled: ({ status, roomClosed, disputeOpen }) => !roomClosed && (status === 'COMPLETED' || disputeOpen),
+    isEnabled: ({ status, roomClosed, disputeOpen }) => !roomClosed && (status === 'COMPLETED' || disputeOpen || status === 'CANCELLED'),
     helper: 'Close room once settlement or dispute resolution finishes.',
   },
 ]
 
-export default function RoleActionsPanel({ role, setRole, status, disputeOpen, roomClosed, onAction }) {
-  const context = { status, disputeOpen, roomClosed }
+export default function RoleActionsPanel({ role, status, escrowStatus, disputeOpen, roomClosed, onAction }) {
+  const context = { status, escrowStatus, disputeOpen, roomClosed }
+
+  // Filter actions to only those applicable to the current role
+  const availableActions = actions.filter((action) => action.roles.includes(role))
 
   return (
     <Card interactive={false} className="xl:sticky xl:top-24">
       <CardHeader>
         <CardTitle className="text-xl">Actions</CardTitle>
-        <CardDescription>Role-based controls to move the trade forward.</CardDescription>
+        <CardDescription>Your available controls to move the trade forward.</CardDescription>
       </CardHeader>
 
       <CardContent className="space-y-4">
-        <Tabs value={role} onValueChange={setRole}>
-          <TabsList className="grid w-full grid-cols-3">
-            {roleOptions.map((value) => (
-              <TabsTrigger key={value} value={value} className="capitalize">
-                {value}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-
         <div className="space-y-2">
-          {actions.map((action) => {
-            const Icon = action.icon
-            const allowedRole = action.roles.includes(role)
-            const enabled = allowedRole && action.isEnabled(context)
+          {availableActions.length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No actions available for your role at this time.</p>
+          ) : null}
 
-            let helperText = action.helper
-            if (!allowedRole) {
-              helperText = `Available for ${action.roles.join(', ')} role only.`
-            } else if (!enabled) {
-              helperText = 'Unavailable at current status.'
-            }
+          {availableActions.map((action) => {
+            const Icon = action.icon
+            const enabled = action.isEnabled(context)
+            const helperText = enabled ? action.helper : 'Unavailable at current status.'
 
             return (
               <div

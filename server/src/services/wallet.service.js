@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client'
 import { prisma } from '../config/prisma.js'
 import { ApiError } from '../utils/http.js'
+import { publishTradeEvent } from '../utils/trade-stream.js'
 
 const toDecimal = (value) => new Prisma.Decimal(value)
 
@@ -40,7 +41,7 @@ export const getWallet = async (userId) => {
 export const depositFunds = async (userId, input) => {
   const amount = toDecimal(input.amount)
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const wallet = await tx.wallet.update({
       where: { userId },
       data: {
@@ -87,7 +88,7 @@ export const holdFundsForTrade = async (userId, tradeId, input = {}) => {
 
   const amount = toDecimal(input.amount ?? trade.amount)
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const buyerWallet = await tx.wallet.findUnique({ where: { userId } })
     if (!buyerWallet) {
       throw new ApiError(404, 'Buyer wallet not found')
@@ -172,6 +173,9 @@ export const holdFundsForTrade = async (userId, tradeId, input = {}) => {
 
     return { wallet, trade: tradeSnapshot }
   })
+
+  publishTradeEvent(tradeId, { type: 'ESCROW_UPDATED', action: 'HOLD' })
+  return result
 }
 
 export const releaseFundsForTrade = async (actorId, tradeId, input = {}) => {
@@ -203,7 +207,7 @@ export const releaseFundsForTrade = async (actorId, tradeId, input = {}) => {
     throw new ApiError(403, 'Only accepted buyer or moderator can release escrow funds')
   }
 
-  return prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     const [buyerWallet, sellerWallet] = await Promise.all([
       tx.wallet.findUnique({ where: { userId: buyer.userId } }),
       tx.wallet.findUnique({ where: { userId: seller.userId } }),
@@ -308,6 +312,9 @@ export const releaseFundsForTrade = async (actorId, tradeId, input = {}) => {
       trade: tradeSnapshot,
     }
   })
+
+  publishTradeEvent(tradeId, { type: 'ESCROW_UPDATED', action: 'RELEASE' })
+  return result
 }
 
 export const refundFundsForTrade = async (actorId, tradeId, input = {}) => {
@@ -414,4 +421,7 @@ export const refundFundsForTrade = async (actorId, tradeId, input = {}) => {
 
     return { wallet, trade: tradeSnapshot }
   })
+
+  publishTradeEvent(tradeId, { type: 'ESCROW_UPDATED', action: 'REFUND' })
+  return result
 }

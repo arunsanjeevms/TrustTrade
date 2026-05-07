@@ -1,4 +1,5 @@
-const USER_ID_PATTERN = /^u_[a-z0-9_-]{3,}$/i
+const PUBLIC_ID_PATTERN = /^TRD-[A-Z0-9-]{3,}$/i
+const TOKEN_PREFIX = 'tt1.'
 
 function tryParseUrl(value) {
   try {
@@ -8,13 +9,13 @@ function tryParseUrl(value) {
   }
 }
 
-export function extractUserIdFromInvite(text) {
+export function extractTradePublicId(text) {
   const raw = String(text || '').trim()
   if (!raw) {
     return ''
   }
 
-  if (USER_ID_PATTERN.test(raw)) {
+  if (PUBLIC_ID_PATTERN.test(raw)) {
     return raw
   }
 
@@ -24,14 +25,14 @@ export function extractUserIdFromInvite(text) {
   }
 
   const queryCandidates = [
-    url.searchParams.get('user'),
-    url.searchParams.get('uid'),
+    url.searchParams.get('trade'),
+    url.searchParams.get('publicId'),
     url.searchParams.get('id'),
     url.searchParams.get('invite'),
   ]
 
   for (const candidate of queryCandidates) {
-    if (candidate && USER_ID_PATTERN.test(candidate.trim())) {
+    if (candidate && PUBLIC_ID_PATTERN.test(candidate.trim())) {
       return candidate.trim()
     }
   }
@@ -39,7 +40,7 @@ export function extractUserIdFromInvite(text) {
   const pathSegment = url.pathname
     .split('/')
     .filter(Boolean)
-    .find((segment) => USER_ID_PATTERN.test(segment))
+    .find((segment) => PUBLIC_ID_PATTERN.test(segment))
 
   return pathSegment || ''
 }
@@ -58,26 +59,36 @@ export function toShareableQrValue(input, origin) {
   const appOrigin = origin || 'http://localhost:5173'
 
   if (!raw) {
-    return `${appOrigin}/join-trade?user=u_trader007`
+    return `${appOrigin}/join-trade?invite=TRD-0000`
   }
 
   if (isHttpUrl(raw)) {
     return raw
   }
 
-  const userId = extractUserIdFromInvite(raw)
-  if (userId) {
-    return `${appOrigin}/join-trade?user=${encodeURIComponent(userId)}`
+  if (isTradeQrToken(raw)) {
+    return raw
+  }
+
+  const publicId = extractTradePublicId(raw)
+  if (publicId) {
+    return `${appOrigin}/join-trade?invite=${encodeURIComponent(publicId)}`
   }
 
   return raw
+}
+
+export function isTradeQrToken(value) {
+  const raw = String(value || '').trim()
+  return raw.startsWith(TOKEN_PREFIX)
 }
 
 export function normalizeScannedPayload(payload) {
   const raw = String(payload || '').trim()
   return {
     raw,
-    userId: extractUserIdFromInvite(raw),
+    publicId: extractTradePublicId(raw),
     isUrl: isHttpUrl(raw),
+    isTradeToken: isTradeQrToken(raw),
   }
 }

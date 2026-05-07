@@ -3,13 +3,19 @@ import { z } from 'zod'
 import { requireAuth } from '../middleware/auth.js'
 import { validate } from '../middleware/validate.js'
 import { asyncHandler } from '../utils/async-handler.js'
-import { sendSuccess } from '../utils/http.js'
+import { ApiError, sendSuccess } from '../utils/http.js'
 import { serializeData } from '../utils/serialize.js'
+import { parseTradeQrToken } from '../utils/trade-qr.js'
+import { registerTradeStream } from '../utils/trade-stream.js'
 import {
   addMilestone,
   addTradeActivity,
+  closeTradeRoom,
+  confirmDeliveryByPublicId,
   createTrade,
+  getTradeQrPayload,
   getTradeById,
+  joinTradeByPublicId,
   joinTrade,
   listTradeActivities,
   listTrades,
@@ -43,6 +49,7 @@ const createTradeSchema = z.object({
   shippingMethod: z.string().min(2).max(100),
   expectedShipBy: dateFromInput,
   expectedDeliveryBy: dateFromInput,
+  role: z.enum(['BUYER', 'SELLER']).default('SELLER'),
 })
 
 const tradeIdParamsSchema = z.object({
@@ -71,7 +78,52 @@ const addMilestoneSchema = z.object({
   position: z.coerce.number().int().positive().optional(),
 })
 
+const qrJoinSchema = z.object({
+  token: z.string().min(8).optional(),
+  publicId: z.string().min(4).optional(),
+  role: z.enum(['BUYER', 'SELLER']).default('BUYER'),
+})
+
+const qrConfirmSchema = z.object({
+  token: z.string().min(8).optional(),
+  publicId: z.string().min(4).optional(),
+})
+
+const resolveQrPublicId = ({ token, publicId }) => {
+  if (publicId) {
+    return publicId
+  }
+
+  if (!token) {
+    throw new ApiError(400, 'QR token or trade ID is required')
+  }
+
+  const parsed = parseTradeQrToken(token)
+  if (!parsed) {
+    throw new ApiError(400, 'Invalid QR token')
+  }
+
+  return parsed.publicId
+}
+
 tradesRouter.use(requireAuth)
+
+tradesRouter.get(
+  '/:tradeId/stream',
+  validate({ params: tradeIdParamsSchema }),
+  asyncHandler(async (req, res) => {
+    await getTradeById(req.user.id, req.params.tradeId)
+
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    if (typeof res.flushHeaders === 'function') {
+      res.flushHeaders()
+    }
+
+    registerTradeStream(req.params.tradeId, res)
+  }),
+)
 
 tradesRouter.get(
   '/',
@@ -88,6 +140,55 @@ tradesRouter.post(
   asyncHandler(async (req, res) => {
     const trade = await createTrade(req.user.id, req.body)
     return sendSuccess(res, serializeData(trade), 'Trade created', 201)
+  }),
+)
+
+tradesRouter.get(
+  '/:tradeId/qr',
+  validate({ params: tradeIdParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const payload = await getTradeQrPayload(req.user.id, req.params.tradeId)
+    return sendSuccess(res, serializeData(payload))
+  }),
+)
+
+tradesRouter.post(
+  '/qr/join',
+  validate({ body: qrJoinSchema }),
+  asyncHandler(async (req, res) => {
+    const publicId = resolveQrPublicId(req.body)
+    const trade = await joinTradeByPublicId(req.user.id, publicId, req.body)
+
+    await notifyTradeParticipants({
+      tradeId: trade.id,
+      excludeUserId: req.user.id,
+      type: 'TRADE',
+      title: 'Participant joined trade',
+      body: `${req.user.email} joined as ${req.body.role}`,
+      data: { role: req.body.role },
+    })
+
+    return sendSuccess(res, serializeData(trade), 'Joined trade successfully')
+  }),
+)
+
+tradesRouter.post(
+  '/qr/confirm-delivery',
+  validate({ body: qrConfirmSchema }),
+  asyncHandler(async (req, res) => {
+    const publicId = resolveQrPublicId(req.body)
+    const trade = await confirmDeliveryByPublicId(req.user.id, publicId)
+
+    await notifyTradeParticipants({
+      tradeId: trade.id,
+      excludeUserId: req.user.id,
+      type: 'TRADE',
+      title: 'Delivery confirmed',
+      body: 'Buyer confirmed delivery via QR scan',
+      data: { status: trade.status },
+    })
+
+    return sendSuccess(res, serializeData(trade), 'Delivery confirmed')
   }),
 )
 
@@ -116,6 +217,25 @@ tradesRouter.post(
     })
 
     return sendSuccess(res, serializeData(trade), 'Joined trade successfully')
+  }),
+)
+
+tradesRouter.post(
+  '/:tradeId/close',
+  validate({ params: tradeIdParamsSchema }),
+  asyncHandler(async (req, res) => {
+    const trade = await closeTradeRoom(req.user.id, req.params.tradeId)
+
+    await notifyTradeParticipants({
+      tradeId: req.params.tradeId,
+      excludeUserId: req.user.id,
+      type: 'TRADE',
+      title: 'Trade room closed',
+      body: 'Trade room is now closed',
+      data: { roomClosed: true },
+    })
+
+    return sendSuccess(res, serializeData(trade), 'Trade room closed')
   }),
 )
 
@@ -162,5 +282,15 @@ tradesRouter.post(
   asyncHandler(async (req, res) => {
     const milestone = await addMilestone(req.user.id, req.params.tradeId, req.body)
     return sendSuccess(res, serializeData(milestone), 'Milestone added', 201)
+  }),
+)
+
+tradesRouter.post(
+  '/:tradeId/resolve-dispute',
+  validate({ params: tradeIdParamsSchema, body: z.object({ resolution: z.enum(['SELLER', 'BUYER']) }) }),
+  asyncHandler(async (req, res) => {
+    const { resolveDispute } = await import('../services/trade.service.js')
+    const trade = await resolveDispute(req.user.id, req.params.tradeId, req.body)
+    return sendSuccess(res, serializeData(trade), 'Dispute resolved')
   }),
 )

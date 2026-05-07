@@ -24,8 +24,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { normalizeScannedPayload, toShareableQrValue } from '@/lib/qr'
+import { confirmDeliveryByToken, joinTradeByToken } from '@/services/trades'
 
 QrScanner.WORKER_PATH = qrWorkerPath
+
+import { useTradesData } from '@/hooks/use-trades-data'
+import { getAuthUser } from '@/lib/auth-storage'
 
 const MotionDiv = motion.div
 
@@ -54,6 +58,8 @@ const scanLineVariants = {
 }
 
 export default function QrScanPage() {
+  const { trades } = useTradesData()
+  const authUser = getAuthUser()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('scan')
   const [scanState, setScanState] = useState(SCAN_STATES.IDLE)
@@ -62,8 +68,10 @@ export default function QrScanPage() {
   const [scanResult, setScanResult] = useState('')
   const [scanError, setScanError] = useState('')
   const [copiedScan, setCopiedScan] = useState(false)
-  const [qrInput, setQrInput] = useState('u_trader007')
+  const [qrInput, setQrInput] = useState('TRD-1234')
   const [copiedQrValue, setCopiedQrValue] = useState(false)
+  const [actionError, setActionError] = useState('')
+  const [actionSuccess, setActionSuccess] = useState('')
   const fileInputRef = useRef(null)
   const videoRef = useRef(null)
   const scannerRef = useRef(null)
@@ -129,6 +137,8 @@ export default function QrScanPage() {
     hasDecodedRef.current = true
     setCopiedScan(false)
     setScanError('')
+    setActionError('')
+    setActionSuccess('')
     setScanResult(normalized)
     setScanState(SCAN_STATES.SUCCESS)
     await stopCameraScan()
@@ -230,14 +240,51 @@ export default function QrScanPage() {
     setCopiedScan(false)
     setManualCode('')
     setInputMode(false)
+    setActionError('')
+    setActionSuccess('')
   }
 
-  const useScanForJoin = () => {
+  const joinFromScan = async () => {
     if (!scanResult) {
       return
     }
 
-    navigate(`/join-trade?invite=${encodeURIComponent(scanResult)}`)
+    setActionError('')
+    setActionSuccess('')
+
+    try {
+      const payload = await joinTradeByToken({
+        publicId: parsedScan.publicId || undefined,
+        token: parsedScan.publicId ? undefined : scanResult,
+        role: 'BUYER',
+      })
+
+      setActionSuccess('Joined trade successfully.')
+      if (payload?.id) {
+        navigate(`/trade-room/${payload.id}`)
+      }
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to join this trade.')
+    }
+  }
+
+  const confirmDeliveryFromScan = async () => {
+    if (!scanResult) {
+      return
+    }
+
+    setActionError('')
+    setActionSuccess('')
+
+    try {
+      await confirmDeliveryByToken({
+        publicId: parsedScan.publicId || undefined,
+        token: parsedScan.publicId ? undefined : scanResult,
+      })
+      setActionSuccess('Delivery confirmed for this trade.')
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to confirm delivery.')
+    }
   }
 
   const openScannedUrl = () => {
@@ -461,15 +508,32 @@ export default function QrScanPage() {
                   <p className="text-xs uppercase tracking-[0.16em] text-slate-400">Decoded Payload</p>
                   <p className="mt-2 break-all text-sm text-slate-100">{parsedScan.raw}</p>
                   <p className="mt-3 text-sm text-slate-300">
-                    {parsedScan.userId
-                      ? `Detected User ID: ${parsedScan.userId}`
-                      : 'No User ID pattern found in payload. You can still copy or open it.'}
+                    {parsedScan.publicId
+                      ? `Detected Trade ID: ${parsedScan.publicId}`
+                      : parsedScan.isTradeToken
+                        ? 'Detected secure trade token.'
+                        : 'No Trade ID pattern found in payload. You can still copy or open it.'}
                   </p>
 
                   <div className="mt-4 flex flex-wrap gap-2">
-                    {parsedScan.userId ? (
-                      <Button onClick={useScanForJoin}>Use in Join Trade</Button>
-                    ) : null}
+                    {scanResult ? (() => {
+                      const matchedTrade = trades.find((t) => t.publicId === parsedScan.publicId)
+                      const isBuyerInTrade = matchedTrade?.participants?.some(
+                        (p) => p.userId === authUser?.id && p.role === 'BUYER'
+                      )
+                      
+                      if (isBuyerInTrade) {
+                        return (
+                          <Button variant="secondary" onClick={confirmDeliveryFromScan}>
+                            Confirm Delivery
+                          </Button>
+                        )
+                      }
+                      
+                      return (
+                        <Button onClick={joinFromScan}>Join Trade</Button>
+                      )
+                    })() : null}
 
                     {parsedScan.isUrl ? (
                       <Button variant="secondary" onClick={openScannedUrl}>
@@ -483,6 +547,13 @@ export default function QrScanPage() {
                       {copiedScan ? 'Copied' : 'Copy'}
                     </Button>
                   </div>
+
+                  {actionSuccess ? (
+                    <p className="mt-3 text-sm text-success-foreground">{actionSuccess}</p>
+                  ) : null}
+                  {actionError ? (
+                    <p className="mt-3 text-sm text-warning">{actionError}</p>
+                  ) : null}
                 </div>
               ) : null}
             </TabsContent>
@@ -491,10 +562,10 @@ export default function QrScanPage() {
               <div className="grid gap-6 lg:grid-cols-[1fr_280px]">
                 <div className="space-y-4">
                   <div className="space-y-2">
-                    <Label htmlFor="qr-generator-input">Invite value or User ID</Label>
+                    <Label htmlFor="qr-generator-input">Invite value or Trade ID</Label>
                     <Input
                       id="qr-generator-input"
-                      placeholder="u_trader007 or https://..."
+                      placeholder="TRD-1234 or https://..."
                       value={qrInput}
                       onChange={(event) => {
                         setQrInput(event.target.value)
@@ -502,7 +573,7 @@ export default function QrScanPage() {
                       }}
                     />
                     <p className="text-xs text-slate-400">
-                      User IDs are automatically converted to a join invite URL.
+                      Trade IDs are automatically converted to a join invite URL.
                     </p>
                   </div>
 

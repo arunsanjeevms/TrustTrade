@@ -1,16 +1,25 @@
 import { useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { X } from 'lucide-react'
-import { Outlet } from 'react-router-dom'
+import { Navigate, Outlet, useLocation } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import AppHeader from '@/layouts/app-header'
 import AppSidebar from '@/layouts/app-sidebar'
+import { isApiConfigured } from '@/lib/api-client'
+import { getAuthToken } from '@/lib/auth-storage'
 
 const MotionButton = motion.button
 const MotionDiv = motion.div
 
 export default function AppLayout() {
+  const location = useLocation()
+  const token = getAuthToken()
+  const requiresAuth = isApiConfigured()
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false)
+
+  if (requiresAuth && !token) {
+    return <Navigate to="/auth/login" replace state={{ from: location }} />
+  }
 
   return (
     <div className="relative min-h-screen text-foreground">

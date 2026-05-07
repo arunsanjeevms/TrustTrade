@@ -3,6 +3,7 @@ import {
   PlusSquare,
   UserRoundPlus,
   ShieldCheck,
+  ShieldAlert,
   Rows4,
   QrCode,
   UserCircle2,
@@ -14,8 +15,8 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: LayoutDashboard },
   { to: '/create-trade', label: 'Create Trade', icon: PlusSquare },
   { to: '/join-trade', label: 'Join Trade', icon: UserRoundPlus },
-  { to: '/trade-room', label: 'Trade Room', icon: ShieldCheck },
   { to: '/my-trades', label: 'My Trades', icon: Rows4 },
+  { to: '/disputes', label: 'Disputes', icon: ShieldAlert },
   { to: '/qr-scan', label: 'QR Scan', icon: QrCode },
   { to: '/profile', label: 'Profile', icon: UserCircle2 },
 ]

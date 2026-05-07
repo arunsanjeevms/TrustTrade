@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { RadioTower } from 'lucide-react'
+import { RadioTower, Users } from 'lucide-react'
+import { useParams, useNavigate } from 'react-router-dom'
 import ActivityTimelinePanel from '@/components/trade-room/activity-timeline-panel'
 import RoleActionsPanel from '@/components/trade-room/role-actions-panel'
 import StatusProgressTracker from '@/components/trade-room/status-progress-tracker'
@@ -10,24 +11,36 @@ import PageHeader from '@/components/shared/page-header'
 import StatusBadge from '@/components/shared/status-badge'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { useTradesData } from '@/hooks/use-trades-data'
+import { useTradeRoom } from '@/hooks/use-trade-room'
+import { getAuthUser } from '@/lib/auth-storage'
+import { addTradeActivity, closeTradeRoom, updateTradeStatus, getTradeQrPayload } from '@/services/trades'
+import { openDispute as apiOpenDispute } from '@/services/disputes'
+import { QrCode, Download } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
+import { QRCodeCanvas } from 'qrcode.react'
+import { useRef } from 'react'
+import { Button } from '@/components/ui/button'
 
 const MotionDiv = motion.div
 
-const statusFlow = ['HOLD', 'SHIPPED', 'DELIVERED', 'COMPLETED']
+const statusFlow = ['PENDING_JOIN', 'HOLD', 'SHIPPED', 'DELIVERED', 'COMPLETED']
 
 const statusDescription = {
+  PENDING_JOIN: 'Waiting for buyer to join and lock escrow funds.',
   HOLD: 'Funds are secured in escrow and waiting for shipment updates.',
   SHIPPED: 'Tracking has been submitted and shipment is currently in transit.',
   DELIVERED: 'Shipment delivered. Buyer verification is in progress.',
   COMPLETED: 'Trade finalized and escrow release is complete.',
-}
-
-const product = {
-  name: 'MacBook Pro 16 M3',
-  tradeId: 'TRD-4821',
-  price: '$2,580.00',
-  shipping: 'Express insured courier',
+  CANCELLED: 'Trade was cancelled and escrow flow stopped.',
+  DISPUTED: 'Dispute opened. Resolution is in progress.',
 }
 
 function nowTime() {
@@ -38,89 +51,147 @@ function nowTime() {
 }
 
 export default function TradeRoomPage() {
-  const { tradeRoomMessages } = useTradesData()
+  const { tradeId } = useParams()
+  const navigate = useNavigate()
+  const { trade, activities, isLoading, error } = useTradeRoom(tradeId)
   const [role, setRole] = useState('seller')
-  const [currentStatus, setCurrentStatus] = useState('HOLD')
-  const [disputeOpen, setDisputeOpen] = useState(false)
-  const [roomClosed, setRoomClosed] = useState(false)
-  const [localMessages, setLocalMessages] = useState([])
   const [uploadedFiles, setUploadedFiles] = useState([])
-  const messages = [
-    ...tradeRoomMessages.map((message) => ({
-      id: message.id,
-      sender: message.sender,
-      body: message.body,
-      time: message.time,
-    })),
-    ...localMessages,
-  ]
+  
+  // QR Dialog State
+  const [showQrDialog, setShowQrDialog] = useState(false)
+  const [qrPayload, setQrPayload] = useState(null)
+  const [qrLoading, setQrLoading] = useState(false)
+  const [qrError, setQrError] = useState('')
+  const qrCanvasRef = useRef(null)
+
+  // Dispute Dialog State
+  const [showDisputeDialog, setShowDisputeDialog] = useState(false)
+  const [disputeReason, setDisputeReason] = useState('')
+  const [isSubmittingDispute, setIsSubmittingDispute] = useState(false)
+
+  const currentStatus = trade?.status || 'PENDING_JOIN'
+  const disputeOpen = trade?.status === 'DISPUTED'
+  const roomClosed = Boolean(trade?.roomClosed)
+  const authUser = getAuthUser()
+
+  const openQrDialog = async () => {
+    setShowQrDialog(true)
+    setQrLoading(true)
+    setQrError('')
+    
+    try {
+      const payload = await getTradeQrPayload(tradeId)
+      setQrPayload(payload)
+    } catch (err) {
+      setQrError(err instanceof Error ? err.message : 'Unable to load QR payload.')
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  const downloadQr = () => {
+    if (!qrCanvasRef.current || !qrPayload?.token || !trade) return
+    const dataUrl = qrCanvasRef.current.toDataURL('image/png')
+    const anchor = document.createElement('a')
+    anchor.href = dataUrl
+    anchor.download = `trusttrade-${trade.publicId || trade.id}-qr.png`
+    anchor.click()
+  }
+
+  useEffect(() => {
+    if (!trade) {
+      return
+    }
+
+    const participantRole = trade.participants?.find((participant) => participant.userId === authUser?.id)?.role
+    if (participantRole) {
+      setRole(participantRole.toLowerCase())
+      return
+    }
+
+    if (trade.createdBy?.id === authUser?.id) {
+      setRole('seller')
+      return
+    }
+
+    setRole('buyer')
+  }, [trade, authUser?.id])
+
+  const messages = useMemo(() => {
+    return (activities || []).map((activity) => ({
+      id: activity.id,
+      sender: activity.actor?.fullName || (activity.actorId ? 'Participant' : 'System'),
+      body: activity.message,
+      time: new Date(activity.createdAt).toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+    }))
+  }, [activities])
 
   const statusText = roomClosed
     ? 'Room is closed. No further state transitions are available.'
     : disputeOpen
       ? 'Dispute review is active. Completion flow is temporarily paused.'
-      : statusDescription[currentStatus]
+      : statusDescription[currentStatus] || 'Workflow update pending.'
 
-  const appendMessage = (sender, body) => {
-    setLocalMessages((current) => [
-      ...current,
-      {
-        id: `msg-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
-        sender,
-        body,
-        time: nowTime(),
-      },
-    ])
-  }
-
-  const transitionStatus = (nextStatus, note) => {
-    if (nextStatus === currentStatus) {
+  const onAction = async (actionId) => {
+    if (!trade || roomClosed) {
       return
     }
 
-    setCurrentStatus(nextStatus)
-    appendMessage('System', note)
-  }
-
-  const onAction = (actionId) => {
-    if (roomClosed) {
+    if (actionId === 'pay-escrow') {
+      navigate(`/payment?tradeId=${trade.id}`)
       return
     }
 
     if (actionId === 'add-tracking' && currentStatus === 'HOLD') {
-      appendMessage('Seller', 'Tracking ID TTX-73319 uploaded with courier confirmation.')
-      transitionStatus('SHIPPED', 'Status updated to SHIPPED after tracking verification.')
+      await updateTradeStatus(trade.id, 'SHIPPED', 'Seller added tracking details.')
       return
     }
 
     if (actionId === 'confirm-delivery' && currentStatus === 'SHIPPED') {
-      appendMessage('Buyer', 'Package delivered and condition verified by buyer.')
-      transitionStatus('DELIVERED', 'Status updated to DELIVERED. Ready for escrow release.')
+      await updateTradeStatus(trade.id, 'DELIVERED', 'Buyer confirmed delivery.')
       return
     }
 
     if (actionId === 'release-escrow' && currentStatus === 'DELIVERED' && !disputeOpen) {
-      transitionStatus('COMPLETED', 'Escrow has been released to seller. Trade is now complete.')
+      await updateTradeStatus(trade.id, 'COMPLETED', 'Escrow released to seller.')
       return
     }
 
     if (actionId === 'raise-dispute' && currentStatus !== 'COMPLETED' && !disputeOpen) {
-      setDisputeOpen(true)
-      appendMessage(
-        role.charAt(0).toUpperCase() + role.slice(1),
-        'Dispute opened: item condition mismatch requires moderator review.',
-      )
-      appendMessage('System', 'Dispute ticket created. Workflow is paused until resolution.')
+      setDisputeReason('')
+      setShowDisputeDialog(true)
       return
     }
 
-    if (actionId === 'close-room' && (currentStatus === 'COMPLETED' || disputeOpen)) {
-      setRoomClosed(true)
-      appendMessage('System', 'Trade room closed and archived for compliance records.')
+    if (actionId === 'close-room' && (currentStatus === 'COMPLETED' || disputeOpen || currentStatus === 'CANCELLED')) {
+      await closeTradeRoom(trade.id)
     }
   }
 
-  const onFilesAdded = (files) => {
+  const handleDisputeSubmit = async () => {
+    if (!disputeReason.trim()) return
+    setIsSubmittingDispute(true)
+    try {
+      const evidence = uploadedFiles.map((file) => ({
+        evidenceType: file.name.match(/\.(pdf)$/i) ? 'PDF' : file.name.match(/\.(mp4|mov)$/i) ? 'VIDEO' : 'IMAGE',
+        description: file.name,
+      }))
+      
+      await apiOpenDispute({ tradeId: trade.id, reason: disputeReason.trim(), evidence })
+      setShowDisputeDialog(false)
+      navigate('/disputes')
+    } catch (err) {
+      console.error(err)
+      // handle error gracefully if needed
+    } finally {
+      setIsSubmittingDispute(false)
+    }
+  }
+
+  const onFilesAdded = async (files) => {
     const prepared = files.map((file) => ({
       id: `file-${Date.now()}-${Math.random().toString(16).slice(2, 7)}`,
       name: file.name,
@@ -129,11 +200,36 @@ export default function TradeRoomPage() {
     }))
 
     setUploadedFiles((current) => [...prepared, ...current].slice(0, 12))
-    appendMessage(
-      'System',
-      `${prepared.length} file${prepared.length > 1 ? 's were' : ' was'} uploaded to verification vault.`,
+    if (trade) {
+      await addTradeActivity(
+        trade.id,
+        `${prepared.length} file${prepared.length > 1 ? 's were' : ' was'} uploaded to verification vault.`,
+      )
+    }
+  }
+
+  if (isLoading && !trade) {
+    return (
+      <AnimatedPage>
+        <PageHeader title="Trade Room" subtitle="Loading trade room..." />
+      </AnimatedPage>
     )
   }
+
+  if (!trade) {
+    return (
+      <AnimatedPage>
+        <PageHeader title="Trade Room" subtitle={error || 'Trade room not found.'} />
+      </AnimatedPage>
+    )
+  }
+
+  const priceLabel = new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: trade.currency || 'USD',
+  }).format(Number(trade.amount || 0))
+
+  const roleLabel = role.toUpperCase()
 
   return (
     <AnimatedPage>
@@ -141,9 +237,24 @@ export default function TradeRoomPage() {
         title="Trade Room"
         subtitle="Professional escrow workflow with live activity, role controls, and clear status progression."
         actions={
-          <div className="inline-flex items-center gap-2 rounded-2xl border border-success/30 bg-success/15 px-3 py-1 text-xs font-semibold text-success-foreground">
-            <span className={`h-2 w-2 rounded-full bg-success ${roomClosed ? '' : 'animate-pulse'}`} />
-            {roomClosed ? 'Room Closed' : 'Live Updates Active'}
+          <div className="flex items-center gap-3">
+            {/* User role indicator */}
+            <div className={`inline-flex items-center gap-2 rounded-2xl border px-3 py-1 text-xs font-bold h-8 ${
+              roleLabel === 'SELLER'
+                ? 'border-indigo-400/40 bg-indigo-500/15 text-indigo-300'
+                : 'border-amber-400/40 bg-amber-500/15 text-amber-300'
+            }`}>
+              <Users className="h-3.5 w-3.5" />
+              You are the {roleLabel}
+            </div>
+            <Button variant="outline" size="sm" onClick={openQrDialog} className="h-8 gap-2">
+              <QrCode className="h-4 w-4" />
+              Get Invite QR
+            </Button>
+            <div className="inline-flex items-center gap-2 rounded-2xl border border-success/30 bg-success/15 px-3 py-1 text-xs font-semibold text-success-foreground h-8">
+              <span className={`h-2 w-2 rounded-full bg-success ${roomClosed ? '' : 'animate-pulse'}`} />
+              {roomClosed ? 'Room Closed' : 'Live'}
+            </div>
           </div>
         }
       />
@@ -152,26 +263,42 @@ export default function TradeRoomPage() {
         <Card interactive={false} className="h-fit xl:sticky xl:top-24">
           <CardHeader>
             <CardTitle>Trade Details</CardTitle>
-            <CardDescription>Room #{product.tradeId}</CardDescription>
+            <CardDescription>Room #{trade.publicId}</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
               <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground">Product</p>
-              <p className="mt-1 text-base font-semibold text-foreground">{product.name}</p>
+              <p className="mt-1 text-base font-semibold text-foreground">{trade.title}</p>
 
               <div className="mt-4 space-y-2 text-sm">
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Price</span>
-                  <span className="font-semibold text-foreground">{product.price}</span>
+                  <span className="font-semibold text-foreground">{priceLabel}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Shipping</span>
-                  <span className="font-semibold text-foreground">{product.shipping}</span>
+                  <span className="font-semibold text-foreground">{trade.shippingMethod}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Trade ID</span>
-                  <span className="font-semibold text-foreground">{product.tradeId}</span>
+                  <span className="font-semibold text-foreground">{trade.publicId}</span>
                 </div>
+              </div>
+            </div>
+
+            {/* Participants */}
+            <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+              <p className="text-xs uppercase tracking-[0.16em] text-muted-foreground flex items-center gap-1.5"><Users className="h-3 w-3" /> Participants</p>
+              <div className="mt-3 space-y-2">
+                {trade.participants?.map((p) => (
+                  <div key={p.id} className="flex items-center justify-between gap-2">
+                    <span className="text-sm text-foreground">{p.user?.fullName || p.user?.email || 'Unknown'}</span>
+                    <Badge variant={p.role === 'SELLER' ? 'default' : 'secondary'} className="text-[10px]">{p.role}</Badge>
+                  </div>
+                ))}
+                {(!trade.participants || trade.participants.length < 2) && (
+                  <p className="text-xs text-muted-foreground italic">Waiting for second participant to join...</p>
+                )}
               </div>
             </div>
 
@@ -207,15 +334,90 @@ export default function TradeRoomPage() {
           <UploadDropzonePanel files={uploadedFiles} onFilesAdded={onFilesAdded} />
         </div>
 
-        <RoleActionsPanel
-          role={role}
-          setRole={setRole}
-          status={currentStatus}
-          disputeOpen={disputeOpen}
-          roomClosed={roomClosed}
-          onAction={onAction}
-        />
+        <div className="flex flex-col gap-4">
+          {disputeOpen && (
+            <Card interactive={false} className="border-amber-400/30 bg-amber-500/5">
+              <CardContent className="flex flex-col items-center gap-3 py-6">
+                <div className="grid h-12 w-12 place-items-center rounded-full bg-amber-500/20">
+                  <RadioTower className="h-6 w-6 text-amber-400" />
+                </div>
+                <p className="text-center text-sm font-semibold text-amber-200">Dispute is Active</p>
+                <p className="text-center text-xs text-amber-100/70">This trade has an open dispute. Track progress and communicate in the Disputes module.</p>
+                <Button variant="outline" size="sm" onClick={() => navigate('/disputes')} className="mt-1 gap-2">
+                  Go to Disputes
+                </Button>
+              </CardContent>
+            </Card>
+          )}
+          <RoleActionsPanel
+            role={role}
+            status={currentStatus}
+            escrowStatus={trade?.escrowStatus || 'PENDING'}
+            disputeOpen={disputeOpen}
+            roomClosed={roomClosed}
+            onAction={onAction}
+          />
+        </div>
       </div>
+
+      <Dialog open={showQrDialog} onOpenChange={setShowQrDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trade Invite QR Code</DialogTitle>
+            <DialogDescription>
+              Share this QR code with the buyer. When they scan it, they will join the room and their payment will be automatically locked in escrow.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col items-center gap-4 py-2">
+            {qrLoading ? (
+              <p className="text-sm text-muted-foreground">Generating QR...</p>
+            ) : qrError ? (
+              <p className="text-sm text-warning">{qrError}</p>
+            ) : qrPayload?.token ? (
+              <QRCodeCanvas value={qrPayload.token} size={200} ref={qrCanvasRef} />
+            ) : (
+              <p className="text-sm text-muted-foreground">QR not available.</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={downloadQr} disabled={!qrPayload?.token}>
+              <Download className="h-4 w-4" />
+              Download JPG/PNG
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showDisputeDialog} onOpenChange={setShowDisputeDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Raise a Dispute</DialogTitle>
+            <DialogDescription>
+              Please provide a detailed reason for the dispute. Any files uploaded to the Verification Vault will be attached as evidence automatically.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="py-2">
+            <Textarea
+              placeholder="Explain the issue in detail..."
+              value={disputeReason}
+              onChange={(e) => setDisputeReason(e.target.value)}
+              className="min-h-[100px]"
+            />
+          </div>
+
+          <DialogFooter>
+            <Button variant="secondary" onClick={() => setShowDisputeDialog(false)}>
+              Cancel
+            </Button>
+            <Button variant="destructive" disabled={!disputeReason.trim() || isSubmittingDispute} onClick={handleDisputeSubmit}>
+              {isSubmittingDispute ? 'Submitting...' : 'Submit Dispute'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AnimatedPage>
   )
 }

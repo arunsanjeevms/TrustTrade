@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import { usePreferences } from '@/hooks/use-preferences'
+import { getAuthUser, clearAuthSession } from '@/lib/auth-storage'
 
 const pageMeta = {
   '/': { title: 'Dashboard', subtitle: 'Monitor active trades and escrow status.' },
@@ -55,8 +56,26 @@ export default function AppHeader({ onOpenMenu }) {
   const location = useLocation()
   const navigate = useNavigate()
   const { preferences, toggleTheme } = usePreferences()
-  const current = pageMeta[location.pathname] || pageMeta['/']
+  const user = getAuthUser()
+  const current = location.pathname.startsWith('/trade-room')
+    ? pageMeta['/trade-room']
+    : pageMeta[location.pathname] || pageMeta['/']
   const isDark = preferences.theme === 'dark'
+
+  const handleSignOut = () => {
+    clearAuthSession()
+    navigate('/auth/login')
+  }
+
+  const getInitials = (name) => {
+    if (!name) return 'U'
+    return name
+      .split(' ')
+      .map((n) => n[0])
+      .join('')
+      .toUpperCase()
+      .substring(0, 2)
+  }
 
   return (
     <header className="sticky top-0 z-30 border-b border-white/10 bg-slate-950/70 backdrop-blur-2xl">
@@ -137,9 +156,9 @@ export default function AppHeader({ onOpenMenu }) {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="h-10 gap-2 rounded-2xl px-2">
                 <Avatar className="h-8 w-8 border border-white/10">
-                  <AvatarFallback>TT</AvatarFallback>
+                  <AvatarFallback>{getInitials(user?.fullName)}</AvatarFallback>
                 </Avatar>
-                <span className="hidden text-sm sm:inline">Ari Trader</span>
+                <span className="hidden text-sm sm:inline">{user?.fullName || 'User'}</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
@@ -157,7 +176,7 @@ export default function AppHeader({ onOpenMenu }) {
                 Preferences
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => navigate('/auth/login')}>Sign out</DropdownMenuItem>
+              <DropdownMenuItem onClick={handleSignOut}>Sign out</DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>

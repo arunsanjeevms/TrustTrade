@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 import { CheckCheck, CircleCheckBig, FileText } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import AnimatedPage from '@/components/animated-page'
 import FormField from '@/components/forms/form-field'
 import ImageUploadField from '@/components/forms/image-upload-field'
@@ -19,6 +20,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { createTrade } from '@/services/trades'
 
 const MotionDiv = motion.div
 
@@ -33,11 +35,12 @@ const initialForm = {
   description: '',
   price: '',
   shippingMethod: '',
+  role: 'SELLER',
   images: [],
 }
 
 const stepFields = {
-  1: ['productName', 'description', 'images'],
+  1: ['productName', 'description', 'role', 'images'],
   2: ['price', 'shippingMethod'],
 }
 
@@ -95,11 +98,13 @@ function validateForm(form) {
 }
 
 export default function CreateTradePage() {
+  const navigate = useNavigate()
   const [currentStep, setCurrentStep] = useState(1)
   const [direction, setDirection] = useState(1)
   const [form, setForm] = useState(initialForm)
   const [errors, setErrors] = useState({})
   const [submittedTrade, setSubmittedTrade] = useState(null)
+  const [submitError, setSubmitError] = useState('')
   const imagesRef = useRef([])
 
   useEffect(() => {
@@ -198,7 +203,7 @@ export default function CreateTradePage() {
     setCurrentStep((current) => Math.max(current - 1, 1))
   }
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault()
     const allErrors = validateForm(form)
     if (Object.keys(allErrors).length > 0) {
@@ -208,17 +213,37 @@ export default function CreateTradePage() {
       return
     }
 
-    setSubmittedTrade({
-      ...form,
-      price: parsePrice(form.price).toFixed(2),
-      id: `TRD-${Math.floor(1000 + Math.random() * 9000)}`,
-    })
+    setSubmitError('')
+    try {
+      const created = await createTrade({
+        title: form.productName.trim(),
+        description: form.description.trim(),
+        amount: parsePrice(form.price),
+        currency: 'USD',
+        shippingMethod: form.shippingMethod,
+        role: form.role,
+      })
 
-    form.images.forEach((image) => URL.revokeObjectURL(image.preview))
-    setForm(initialForm)
-    setErrors({})
-    setDirection(-1)
-    setCurrentStep(1)
+      setSubmittedTrade({
+        ...form,
+        price: parsePrice(form.price).toFixed(2),
+        id: created?.publicId || created?.id || 'Trade',
+      })
+
+      form.images.forEach((image) => URL.revokeObjectURL(image.preview))
+      setForm(initialForm)
+      setErrors({})
+      setDirection(-1)
+      setCurrentStep(1)
+
+      if (created?.id) {
+        window.setTimeout(() => {
+          navigate(`/trade-room/${created.id}`)
+        }, 500)
+      }
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to create trade right now.')
+    }
   }
 
   return (
@@ -304,6 +329,24 @@ export default function CreateTradePage() {
                           value={form.description}
                           onChange={(event) => updateField('description', event.target.value)}
                         />
+                      </FormField>
+
+                      <FormField
+                        label="Your Role"
+                        htmlFor="role"
+                        required
+                        hint="Are you selling this product or buying it?"
+                        error={errors.role}
+                      >
+                        <select
+                          id="role"
+                          value={form.role}
+                          onChange={(event) => updateField('role', event.target.value)}
+                          className="flex h-11 w-full rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-sm text-foreground transition-all duration-300 ease-in-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <option value="SELLER" className="bg-slate-900 text-slate-100">SELLER</option>
+                          <option value="BUYER" className="bg-slate-900 text-slate-100">BUYER</option>
+                        </select>
                       </FormField>
 
                       <FormField
@@ -453,6 +496,11 @@ export default function CreateTradePage() {
               {submittedTrade.id} is now ready for participant invites and escrow setup.
             </p>
           </MotionDiv>
+        ) : null}
+        {submitError ? (
+          <div className="mt-4 rounded-2xl border border-warning/40 bg-warning/15 p-4 text-sm text-warning-foreground">
+            {submitError}
+          </div>
         ) : null}
       </div>
     </AnimatedPage>

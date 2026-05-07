@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { motion } from 'framer-motion'
 import { ArrowRight, CircleCheck, ClipboardPaste, QrCode, UserRoundPlus } from 'lucide-react'
-import { Link, useLocation } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import AnimatedPage from '@/components/animated-page'
 import JoinGuidance from '@/components/join-trade/join-guidance'
 import RecentJoinHistory from '@/components/join-trade/recent-join-history'
@@ -10,7 +10,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { extractUserIdFromInvite } from '@/lib/qr'
+import { extractTradePublicId, isTradeQrToken } from '@/lib/qr'
+import { joinTradeByToken } from '@/services/trades'
 
 const MotionDiv = motion.div
 
@@ -22,13 +23,15 @@ const initialHistory = [
 
 export default function JoinTradePage() {
   const location = useLocation()
-  const [userId, setUserId] = useState('')
+  const navigate = useNavigate()
+  const [tradeCode, setTradeCode] = useState('')
   const [submitted, setSubmitted] = useState(false)
   const [touched, setTouched] = useState(false)
   const [pasteError, setPasteError] = useState('')
+  const [submitError, setSubmitError] = useState('')
   const [joinHistory, setJoinHistory] = useState(initialHistory)
 
-  const hasError = touched && userId.trim().length < 4
+  const hasError = touched && tradeCode.trim().length < 4
 
   useEffect(() => {
     const params = new URLSearchParams(location.search)
@@ -43,13 +46,13 @@ export default function JoinTradePage() {
       return
     }
 
-    const extracted = extractUserIdFromInvite(inviteValue)
-    if (!extracted) {
-      setPasteError('Scanned QR did not contain a valid User ID.')
+    const extracted = extractTradePublicId(inviteValue)
+    if (!extracted && !isTradeQrToken(inviteValue)) {
+      setPasteError('Scanned QR did not contain a valid Trade ID or token.')
       return
     }
 
-    setUserId(extracted)
+    setTradeCode(extracted || inviteValue)
     setTouched(true)
     setSubmitted(false)
     setPasteError('')
@@ -60,14 +63,14 @@ export default function JoinTradePage() {
 
     try {
       const clipboardText = await navigator.clipboard.readText()
-      const extracted = extractUserIdFromInvite(clipboardText)
+      const extracted = extractTradePublicId(clipboardText)
 
-      if (!extracted) {
-        setPasteError('No valid User ID found in pasted link.')
+      if (!extracted && !isTradeQrToken(clipboardText)) {
+        setPasteError('No valid Trade ID or token found in pasted link.')
         return
       }
 
-      setUserId(extracted)
+      setTradeCode(extracted || clipboardText)
       setTouched(true)
       setSubmitted(false)
     } catch {
@@ -75,31 +78,49 @@ export default function JoinTradePage() {
     }
   }
 
-  const onSubmit = (event) => {
+  const onSubmit = async (event) => {
     event.preventDefault()
     setTouched(true)
 
-    if (userId.trim().length < 4) {
+    if (tradeCode.trim().length < 4) {
       return
     }
 
-    setSubmitted(true)
-    setJoinHistory((current) => [
-      {
-        id: `jh-${Date.now()}`,
-        userId: userId.trim(),
-        status: 'pending',
-        time: 'Just now',
-      },
-      ...current,
-    ].slice(0, 5))
+    setSubmitError('')
+    try {
+      const publicId = extractTradePublicId(tradeCode)
+      const payload = await joinTradeByToken({
+        publicId: publicId || undefined,
+        token: publicId ? undefined : tradeCode.trim(),
+        role: 'BUYER',
+      })
+
+      setSubmitted(true)
+      setJoinHistory((current) => [
+        {
+          id: `jh-${Date.now()}`,
+          userId: publicId || tradeCode.trim(),
+          status: 'accepted',
+          time: 'Just now',
+        },
+        ...current,
+      ].slice(0, 5))
+
+      if (payload?.id) {
+        window.setTimeout(() => {
+          navigate(`/trade-room/${payload.id}`)
+        }, 400)
+      }
+    } catch (error) {
+      setSubmitError(error instanceof Error ? error.message : 'Unable to join this trade.')
+    }
   }
 
   return (
     <AnimatedPage className="space-y-6">
       <PageHeader
         title="Join Trade"
-        subtitle="Send a secure join request using User ID, invite link, or QR flow."
+        subtitle="Send a secure join request using Trade ID, invite link, or QR flow."
       />
 
       <MotionDiv
@@ -114,7 +135,7 @@ export default function JoinTradePage() {
               <UserRoundPlus className="h-5 w-5 text-indigo-300" />
               Request Room Access
             </CardTitle>
-            <CardDescription>Enter your partner User ID or quickly import from an invite.</CardDescription>
+            <CardDescription>Enter a Trade ID or import from a QR invite.</CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
             <JoinGuidance />
@@ -122,20 +143,21 @@ export default function JoinTradePage() {
             <form className="space-y-4" onSubmit={onSubmit} noValidate>
               <div className="space-y-2">
                 <div className="flex items-center justify-between gap-3">
-                  <Label htmlFor="trade-user-id">User ID</Label>
-                  <span className="text-xs text-muted-foreground">Example: u_trader007</span>
+                  <Label htmlFor="trade-user-id">Trade ID or Token</Label>
+                  <span className="text-xs text-muted-foreground">Example: TRD-1234</span>
                 </div>
                 <Input
                   id="trade-user-id"
-                  placeholder="e.g. u_trader007"
-                  value={userId}
+                  placeholder="e.g. TRD-1234"
+                  value={tradeCode}
                   onChange={(event) => {
-                    setUserId(event.target.value)
+                    setTradeCode(event.target.value)
                     setSubmitted(false)
                     setPasteError('')
+                    setSubmitError('')
                   }}
                 />
-                {hasError ? <p className="text-xs text-red-300">User ID must be at least 4 characters.</p> : null}
+                {hasError ? <p className="text-xs text-red-300">Trade ID must be at least 4 characters.</p> : null}
                 {pasteError ? <p className="text-xs text-warning">{pasteError}</p> : null}
               </div>
 
@@ -169,9 +191,11 @@ export default function JoinTradePage() {
                   <CircleCheck className="h-4 w-4" />
                   Request Sent
                 </div>
-                Invite successfully submitted to {userId.trim()}. They will appear in your room once accepted.
+                Invite successfully submitted for {tradeCode.trim()}. You will join the room once accepted.
               </MotionDiv>
             ) : null}
+
+            {submitError ? <p className="text-sm text-warning">{submitError}</p> : null}
 
             <div className="border-t border-white/10 pt-2">
               <RecentJoinHistory items={joinHistory} />

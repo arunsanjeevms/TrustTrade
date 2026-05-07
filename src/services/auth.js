@@ -1,4 +1,5 @@
 import { apiRequest, isApiConfigured } from '@/lib/api-client'
+import { setAuthSession } from '@/lib/auth-storage'
 
 function sleep(ms) {
   return new Promise((resolve) => {
@@ -18,12 +19,16 @@ function defaultUserFromEmail(email, fallbackName = 'Trust Trade User') {
 }
 
 function normalizeAuthResponse(payload, fallbackEmail, fallbackName) {
-  const user = payload?.user && typeof payload.user === 'object'
-    ? payload.user
+  const resolved = payload?.data && typeof payload.data === 'object'
+    ? payload.data
+    : payload
+
+  const user = resolved?.user && typeof resolved.user === 'object'
+    ? resolved.user
     : defaultUserFromEmail(fallbackEmail, fallbackName)
 
   return {
-    token: payload?.token || payload?.accessToken || 'mock-token',
+    token: resolved?.token || resolved?.accessToken || 'mock-token',
     user,
   }
 }
@@ -35,11 +40,15 @@ export async function loginUser({ email, password }) {
       body: { email, password },
     })
 
-    return normalizeAuthResponse(payload, email)
+    const session = normalizeAuthResponse(payload, email)
+    setAuthSession(session)
+    return session
   }
 
   await sleep(550)
-  return normalizeAuthResponse(null, email)
+  const session = normalizeAuthResponse(null, email)
+  setAuthSession(session)
+  return session
 }
 
 export async function registerUser({ fullName, email, password }) {
@@ -49,9 +58,13 @@ export async function registerUser({ fullName, email, password }) {
       body: { fullName, email, password },
     })
 
-    return normalizeAuthResponse(payload, email, fullName)
+    const session = normalizeAuthResponse(payload, email, fullName)
+    setAuthSession(session)
+    return session
   }
 
   await sleep(650)
-  return normalizeAuthResponse(null, email, fullName)
+  const session = normalizeAuthResponse(null, email, fullName)
+  setAuthSession(session)
+  return session
 }

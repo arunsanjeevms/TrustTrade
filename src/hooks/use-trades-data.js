@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { tradeRoomMessages as mockTradeRoomMessages, trades as mockTrades } from '@/data/mock'
+import { trades as mockTrades } from '@/data/mock'
 import { getTradesSnapshot } from '@/services/trades'
 
 const initialState = {
   trades: mockTrades,
-  tradeRoomMessages: mockTradeRoomMessages,
   source: 'mock',
   isLoading: false,
   error: null,

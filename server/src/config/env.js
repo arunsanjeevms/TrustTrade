@@ -8,6 +8,7 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16, 'JWT_SECRET must be at least 16 characters'),
   JWT_EXPIRES_IN: z.string().default('7d'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
+  QR_SECRET: z.string().min(16).optional(),
 })
 
 const parsed = envSchema.safeParse(process.env)
@@ -17,4 +18,7 @@ if (!parsed.success) {
   throw new Error(`Invalid environment variables: ${JSON.stringify(errors)}`)
 }
 
-export const env = parsed.data
+export const env = {
+  ...parsed.data,
+  QR_SECRET: parsed.data.QR_SECRET || parsed.data.JWT_SECRET,
+}

@@ -7,75 +7,86 @@ import AnimatedPage from '@/components/animated-page'
 import PageHeader from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { useTradesData } from '@/hooks/use-trades-data'
-
-const stats = [
-  {
-    id: 'active-trades',
-    title: 'Active Trades',
-    value: '24',
-    trendValue: 12.4,
-    trendLabel: 'vs last 7 days',
-    icon: CirclePlus,
-  },
-  {
-    id: 'escrow-volume',
-    title: 'Escrow Volume',
-    value: '$183,420',
-    trendValue: 8.4,
-    trendLabel: 'vs last month',
-    icon: Wallet,
-  },
-  {
-    id: 'success-rate',
-    title: 'Success Rate',
-    value: '98.7%',
-    trendValue: 0.9,
-    trendLabel: 'quality trend',
-    icon: PackageCheck,
-  },
-  {
-    id: 'pending-actions',
-    title: 'Pending Actions',
-    value: '7',
-    trendValue: -5.2,
-    trendLabel: 'needs immediate follow-up',
-    icon: AlertTriangle,
-    highlight: true,
-  },
-]
-
-const recentActivity = [
-  {
-    id: 'timeline-1',
-    title: 'Buyer joined',
-    detail: 'u_ryan009 entered trade room TRD-4821 and passed initial verification.',
-    timestamp: '2 min ago',
-    icon: UserPlus2,
-  },
-  {
-    id: 'timeline-2',
-    title: 'Payment deposited',
-    detail: 'Escrow received $2,580.00 for the MacBook Pro transaction.',
-    timestamp: '9 min ago',
-    icon: Wallet,
-  },
-  {
-    id: 'timeline-3',
-    title: 'Shipment uploaded',
-    detail: 'Tracking proof and package images were submitted for Sony FX30 Kit.',
-    timestamp: '21 min ago',
-    icon: PackageCheck,
-  },
-]
+import { getAuthUser } from '@/lib/auth-storage'
 
 export default function DashboardPage() {
   const { trades } = useTradesData()
-  const priorityTrades = trades.filter((trade) => trade.status === 'HOLD' || trade.status === 'SHIPPED').slice(0, 4)
+  const authUser = getAuthUser()
+
+  const priorityTrades = trades.filter((trade) => ['HOLD', 'SHIPPED', 'DISPUTED'].includes(trade.status)).slice(0, 4)
+  const activeTradesCount = trades.filter(t => !['COMPLETED', 'CANCELLED'].includes(t.status)).length
+  const escrowVolume = trades.reduce((acc, t) => acc + (t.escrowStatus === 'LOCKED' ? t.amount : 0), 0)
+  
+  const completed = trades.filter(t => t.status === 'COMPLETED').length
+  const cancelled = trades.filter(t => t.status === 'CANCELLED').length
+  const successRate = (completed + cancelled) === 0 ? 100 : Math.round((completed / (completed + cancelled)) * 100)
+
+  const stats = [
+    {
+      id: 'active-trades',
+      title: 'Active Trades',
+      value: activeTradesCount.toString(),
+      trendValue: 12.4, // Static trend for demo purposes
+      trendLabel: 'vs last 7 days',
+      icon: CirclePlus,
+    },
+    {
+      id: 'escrow-volume',
+      title: 'Escrow Volume',
+      value: `$${escrowVolume.toLocaleString()}`,
+      trendValue: 8.4,
+      trendLabel: 'vs last month',
+      icon: Wallet,
+    },
+    {
+      id: 'success-rate',
+      title: 'Success Rate',
+      value: `${successRate}%`,
+      trendValue: 0.9,
+      trendLabel: 'quality trend',
+      icon: PackageCheck,
+    },
+    {
+      id: 'pending-actions',
+      title: 'Pending Actions',
+      value: priorityTrades.length.toString(),
+      trendValue: -5.2,
+      trendLabel: 'needs immediate follow-up',
+      icon: AlertTriangle,
+      highlight: true,
+    },
+  ]
+
+  const recentActivity = trades
+    .flatMap((t) => (t.activities || []).map(a => ({ ...a, tradeId: t.publicId || t.id })))
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+    .slice(0, 5)
+    .map((activity, i) => {
+      const timeDiff = Math.floor((new Date().getTime() - new Date(activity.createdAt).getTime()) / 60000)
+      return {
+        id: `activity-${activity.id || i}`,
+        title: activity.type === 'STATUS_CHANGE' ? 'Status Updated' : activity.type === 'MESSAGE' ? 'New Message' : activity.type,
+        detail: `[${activity.tradeId}] ${activity.message}`,
+        timestamp: timeDiff < 60 ? `${timeDiff} min ago` : `${Math.floor(timeDiff / 60)}h ago`,
+        icon: activity.type === 'STATUS_CHANGE' ? PackageCheck : activity.type === 'ESCROW_UPDATE' ? Wallet : UserPlus2,
+      }
+    })
+
+  // Fallback if no activity
+  if (recentActivity.length === 0) {
+    recentActivity.push({
+      id: 'timeline-empty',
+      title: 'No recent activity',
+      detail: 'Your activity timeline will populate once trades have updates.',
+      timestamp: 'Just now',
+      icon: CirclePlus,
+    })
+  }
 
   return (
     <AnimatedPage className="space-y-7">
       <PageHeader
-        title="Welcome back, Ari"
+        title={`Welcome back, ${authUser?.fullName || 'Trader'}`}
         subtitle="Your trading overview with escrow performance, active timelines, and urgent trades in one premium workspace."
         actions={
           <div className="flex flex-wrap gap-2">

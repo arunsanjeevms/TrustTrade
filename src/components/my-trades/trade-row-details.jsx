@@ -1,11 +1,13 @@
 import { CalendarDays, ShieldCheck, Truck, Wallet } from 'lucide-react'
 
 const statusNotes = {
+  PENDING_JOIN: 'Waiting for buyer to join and fund escrow.',
   HOLD: 'Escrow is active and awaiting shipment evidence.',
   SHIPPED: 'Package is in transit. Buyer confirmation pending.',
   DELIVERED: 'Delivery confirmed. Escrow release is near-ready.',
   COMPLETED: 'Trade settled successfully and archived.',
   CANCELLED: 'Trade was cancelled. No payout will be released.',
+  DISPUTED: 'Dispute opened. Resolution is in progress.',
 }
 
 export default function TradeRowDetails({ trade, formattedAmount, formattedDate }) {
@@ -16,7 +18,7 @@ export default function TradeRowDetails({ trade, formattedAmount, formattedDate 
           <Truck className="h-3.5 w-3.5" />
           Shipping
         </div>
-        <p className="text-sm font-medium text-foreground">{trade.shipping}</p>
+        <p className="text-sm font-medium text-foreground">{trade.shippingMethod || trade.shipping}</p>
       </div>
 
       <div className="space-y-1">

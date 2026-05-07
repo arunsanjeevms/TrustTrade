@@ -14,14 +14,17 @@ import { Badge } from '@/components/ui/badge'
 
 const MotionDiv = motion.div
 
+import { getAuthUser } from '@/lib/auth-storage'
+
 const defaultProfile = {
-  fullName: 'Ari Johnson',
-  email: 'ari@trusttrade.app',
-  phone: '+1 (555) 218-4100',
-  bio: 'Product trader focused on high-value electronics and camera gear.',
+  fullName: 'User',
+  email: '',
+  phone: '',
+  bio: '',
   avatar: '',
 }
 
+// ... keeping static mock data for trust score, wallet, etc since they are just UI placeholders.
 const trustScore = 4.9
 const trustScoreMax = 5.0
 const trustScoreBreakdown = {
@@ -65,7 +68,12 @@ function ProfileCompletionBar({ percent }) {
 }
 
 export default function ProfilePage() {
-  const [profile, setProfile] = useState(defaultProfile)
+  const authUser = getAuthUser()
+  const [profile, setProfile] = useState({
+    ...defaultProfile,
+    fullName: authUser?.fullName || 'User',
+    email: authUser?.email || '',
+  })
   const [saved, setSaved] = useState(false)
 
   // For demo, profile completion is static. In real app, calculate based on filled fields and verifications.
@@ -100,7 +108,7 @@ export default function ProfilePage() {
               <ProfileCompletionBar percent={profileCompletion} />
               <div className="flex items-center gap-4 mb-3">
                 <Avatar className="h-16 w-16 border border-white/10">
-                  <AvatarFallback>AJ</AvatarFallback>
+                  <AvatarFallback>{profile.fullName.split(' ').map(w => w[0]).join('').toUpperCase().slice(0, 2) || 'U'}</AvatarFallback>
                 </Avatar>
                 <div>
                   <div className="font-semibold text-lg text-white">{profile.fullName}</div>

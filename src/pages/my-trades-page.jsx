@@ -1,28 +1,44 @@
-﻿import { Fragment, useMemo, useState } from 'react'
+import { Fragment, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
-import { Ban, ChevronDown, ChevronRight, Download, Search, SlidersHorizontal } from 'lucide-react'
+import { Ban, ChevronDown, ChevronRight, Download, Eye, QrCode, Search, SlidersHorizontal } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { QRCodeCanvas } from 'qrcode.react'
 import AnimatedPage from '@/components/animated-page'
 import TradeRowDetails from '@/components/my-trades/trade-row-details'
 import TradeStatusVisual from '@/components/my-trades/trade-status-visual'
 import PageHeader from '@/components/shared/page-header'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { useTradesData } from '@/hooks/use-trades-data'
+import { getAuthUser } from '@/lib/auth-storage'
+import { getTradeQrPayload } from '@/services/trades'
 
-const filters = ['ALL', 'HOLD', 'SHIPPED', 'DELIVERED', 'CANCELLED']
+const filters = ['ALL', 'PENDING_JOIN', 'HOLD', 'SHIPPED', 'DELIVERED', 'COMPLETED', 'CANCELLED', 'DISPUTED']
 const MotionDiv = motion.div
 
-const toCurrency = (value) =>
+const toCurrency = (value, currency = 'USD') =>
   new Intl.NumberFormat('en-US', {
     style: 'currency',
-    currency: 'USD',
+    currency,
   }).format(value)
 
 const normalizeDate = (value) => {
-  const parsed = Date.parse(value.replace(' ', 'T'))
+  if (!value) {
+    return 0
+  }
+
+  const parsed = Date.parse(String(value).replace(' ', 'T'))
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
@@ -52,6 +68,8 @@ const csvEscape = (value) => `"${String(value).replaceAll('"', '""')}"`
 
 export default function MyTradesPage() {
   const { trades: dataTrades } = useTradesData()
+  const navigate = useNavigate()
+  const authUser = getAuthUser()
   const [tableTrades, setTableTrades] = useState([])
   const [hasLocalMutations, setHasLocalMutations] = useState(false)
   const [activeFilter, setActiveFilter] = useState('ALL')
@@ -60,16 +78,27 @@ export default function MyTradesPage() {
   const [sortDirection, setSortDirection] = useState('desc')
   const [expandedTradeId, setExpandedTradeId] = useState(null)
   const [selectedTradeIds, setSelectedTradeIds] = useState([])
+  const [qrTrade, setQrTrade] = useState(null)
+  const [qrPayload, setQrPayload] = useState(null)
+  const [qrError, setQrError] = useState('')
+  const [qrLoading, setQrLoading] = useState(false)
+  const qrCanvasRef = useRef(null)
 
   const sourceTrades = hasLocalMutations ? tableTrades : dataTrades
 
   const filteredTrades = useMemo(() => {
     const base = sourceTrades.filter((trade) => {
+      const tradeId = trade.publicId || trade.id
+      const partner = trade.partner || trade.participants?.find((participant) => participant.userId !== authUser?.id)?.user?.fullName ||
+        trade.participants?.find((participant) => participant.userId !== authUser?.id)?.user?.email ||
+        trade.createdBy?.fullName ||
+        trade.createdBy?.email ||
+        'Pending'
       const matchesFilter = activeFilter === 'ALL' || trade.status === activeFilter
       const matchesQuery =
         !query ||
-        [trade.id, trade.product, trade.partner].some((field) =>
-          field.toLowerCase().includes(query.toLowerCase()),
+        [tradeId, trade.title || trade.product, partner].filter(Boolean).some((field) =>
+          String(field).toLowerCase().includes(query.toLowerCase()),
         )
 
       return matchesFilter && matchesQuery
@@ -154,7 +183,14 @@ export default function MyTradesPage() {
 
     const headers = ['Trade ID', 'Product', 'Partner', 'Status', 'Amount', 'Date']
     const csvRows = rows.map((trade) =>
-      [trade.id, trade.product, trade.partner, trade.status, trade.amount, trade.updatedAt]
+      [
+        trade.publicId || trade.id,
+        trade.title || trade.product,
+        trade.partner || trade.createdBy?.fullName || '',
+        trade.status,
+        trade.amount,
+        trade.updatedAt,
+      ]
         .map(csvEscape)
         .join(','),
     )
@@ -167,6 +203,41 @@ export default function MyTradesPage() {
     anchor.download = `trusttrade-my-trades-${Date.now()}.csv`
     anchor.click()
     URL.revokeObjectURL(url)
+  }
+
+  const openQrDialog = async (trade) => {
+    setQrTrade(trade)
+    setQrLoading(true)
+    setQrError('')
+    setQrPayload(null)
+
+    try {
+      const payload = await getTradeQrPayload(trade.id)
+      setQrPayload(payload)
+    } catch (error) {
+      setQrError(error instanceof Error ? error.message : 'Unable to load QR payload.')
+    } finally {
+      setQrLoading(false)
+    }
+  }
+
+  const closeQrDialog = () => {
+    setQrTrade(null)
+    setQrPayload(null)
+    setQrError('')
+    setQrLoading(false)
+  }
+
+  const downloadQr = () => {
+    if (!qrCanvasRef.current || !qrPayload?.token || !qrTrade) {
+      return
+    }
+
+    const dataUrl = qrCanvasRef.current.toDataURL('image/png')
+    const anchor = document.createElement('a')
+    anchor.href = dataUrl
+    anchor.download = `trusttrade-${qrTrade.publicId || qrTrade.id}-qr.png`
+    anchor.click()
   }
 
   return (
@@ -232,16 +303,6 @@ export default function MyTradesPage() {
                 <Download className="h-3.5 w-3.5" />
                 Export
               </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="destructive"
-                disabled={!selectedTradeIds.length}
-                onClick={onBulkCancel}
-              >
-                <Ban className="h-3.5 w-3.5" />
-                Cancel
-              </Button>
             </div>
           </div>
 
@@ -263,6 +324,7 @@ export default function MyTradesPage() {
                   <TableHead>Status</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
                   <TableHead className="text-right">Date</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -271,8 +333,15 @@ export default function MyTradesPage() {
                 {filteredTrades.map((trade) => {
                   const isExpanded = expandedTradeId === trade.id
                   const isSelected = selectedTradeIds.includes(trade.id)
-                  const formattedAmount = toCurrency(trade.amount)
+                  const formattedAmount = toCurrency(trade.amount, trade.currency)
                   const formattedDate = formatDate(trade.updatedAt)
+                  const tradeIdLabel = trade.publicId || trade.id
+                  const partnerLabel = trade.partner ||
+                    trade.participants?.find((participant) => participant.userId !== authUser?.id)?.user?.fullName ||
+                    trade.participants?.find((participant) => participant.userId !== authUser?.id)?.user?.email ||
+                    trade.createdBy?.fullName ||
+                    trade.createdBy?.email ||
+                    'Pending'
 
                   return (
                     <Fragment key={trade.id}>
@@ -292,21 +361,44 @@ export default function MyTradesPage() {
                             onChange={() => toggleSelectOne(trade.id)}
                           />
                         </TableCell>
-                        <TableCell className="font-semibold text-foreground">{trade.id}</TableCell>
-                        <TableCell>{trade.product}</TableCell>
-                        <TableCell>{trade.partner}</TableCell>
+                        <TableCell className="font-semibold text-foreground">{tradeIdLabel}</TableCell>
+                        <TableCell>{trade.title || trade.product}</TableCell>
+                        <TableCell>{partnerLabel}</TableCell>
                         <TableCell>
-                          <TradeStatusVisual status={trade.status} />
+                          <TradeStatusVisual status={trade.status} roomClosed={trade.roomClosed} />
                         </TableCell>
                         <TableCell className="text-right font-semibold text-foreground">{formattedAmount}</TableCell>
                         <TableCell className="text-right text-muted-foreground">{formattedDate}</TableCell>
+                        <TableCell
+                          className="text-right"
+                          onClick={(event) => {
+                            event.stopPropagation()
+                          }}
+                        >
+                          <div className="flex items-center justify-end gap-2">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => navigate(`/trade-room/${trade.id}`)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => openQrDialog(trade)}
+                            >
+                              <QrCode className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
                         <TableCell className="text-right text-muted-foreground">
                           {isExpanded ? <ChevronDown className="ml-auto h-4 w-4" /> : <ChevronRight className="ml-auto h-4 w-4" />}
                         </TableCell>
                       </TableRow>
 
                       <tr>
-                        <td colSpan={8} className="p-0">
+                        <td colSpan={9} className="p-0">
                           <AnimatePresence initial={false}>
                             {isExpanded ? (
                               <MotionDiv
@@ -340,6 +432,36 @@ export default function MyTradesPage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <Dialog open={Boolean(qrTrade)} onOpenChange={(open) => (!open ? closeQrDialog() : null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Trade QR Code</DialogTitle>
+            <DialogDescription>
+              Share this QR with the buyer to join or confirm delivery.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex flex-col items-center gap-4 py-2">
+            {qrLoading ? (
+              <p className="text-sm text-muted-foreground">Generating QR...</p>
+            ) : qrError ? (
+              <p className="text-sm text-warning">{qrError}</p>
+            ) : qrPayload?.token ? (
+              <QRCodeCanvas value={qrPayload.token} size={200} ref={qrCanvasRef} />
+            ) : (
+              <p className="text-sm text-muted-foreground">QR not available.</p>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={downloadQr} disabled={!qrPayload?.token}>
+              <Download className="h-4 w-4" />
+              Download QR
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </AnimatedPage>
   )
 }

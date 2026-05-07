@@ -4,12 +4,13 @@ import { ApiError } from '../utils/http.js'
 
 export const requireAuth = (req, _res, next) => {
   const authHeader = req.headers.authorization
+  const bearerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : ''
+  const queryToken = typeof req.query?.token === 'string' ? req.query.token : ''
+  const token = bearerToken || queryToken
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+  if (!token) {
     return next(new ApiError(401, 'Missing or invalid authorization header'))
   }
-
-  const token = authHeader.slice(7)
 
   try {
     const payload = jwt.verify(token, env.JWT_SECRET)

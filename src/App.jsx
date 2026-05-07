@@ -4,9 +4,11 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 const AppLayout = lazy(() => import('@/layouts/app-layout'))
 const CreateTradePage = lazy(() => import('@/pages/create-trade-page'))
 const DashboardPage = lazy(() => import('@/pages/dashboard-page'))
+const DisputesPage = lazy(() => import('@/pages/disputes-page'))
 const JoinTradePage = lazy(() => import('@/pages/join-trade-page'))
 const MyTradesPage = lazy(() => import('@/pages/my-trades-page'))
 const Login = lazy(() => import('@/pages/auth/Login'))
+const PaymentPage = lazy(() => import('@/pages/payment-page'))
 const ProfilePage = lazy(() => import('@/pages/profile-page'))
 const QrScanPage = lazy(() => import('@/pages/qr-scan-page'))
 const Register = lazy(() => import('@/pages/auth/Register'))
@@ -35,8 +37,10 @@ function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/create-trade" element={<CreateTradePage />} />
           <Route path="/join-trade" element={<JoinTradePage />} />
-          <Route path="/trade-room" element={<TradeRoomPage />} />
+          <Route path="/trade-room/:tradeId" element={<TradeRoomPage />} />
           <Route path="/my-trades" element={<MyTradesPage />} />
+          <Route path="/disputes" element={<DisputesPage />} />
+          <Route path="/payment" element={<PaymentPage />} />
           <Route path="/qr-scan" element={<QrScanPage />} />
           <Route path="/profile" element={<ProfilePage />} />
         </Route>
